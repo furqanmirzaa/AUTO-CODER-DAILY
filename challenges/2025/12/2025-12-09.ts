@@ -1,240 +1,198 @@
 /**
  * Daily Coding Challenge: 2025-12-09
- * Problem: Log Entry Aggregator
+ * Problem: Activity Session Durations
  * 
  * Description:
- * You are given a chronologically ordered list of log entries. Each log entry consists of a timestamp and a message. Your task is to aggregate consecutive log entries that share the exact same message into a single 'block' entry. For each block, you need to record the common message, the timestamp of the first entry in the block (start time), the timestamp of the last entry in the block (end time), and the total duration of the block (end time - start time).
+ * You are given a sorted list of unique positive integers representing user activity timestamps (in minutes). You are also given an integer `max_inactive_duration`.
+
+Activities are grouped into "sessions". A new session begins under two conditions:
+1. It's the very first activity.
+2. The current activity occurs after a gap of more than `max_inactive_duration` minutes from the *immediately preceding activity in the same session*.
+
+For each completed session, you need to calculate its total duration. The duration of a session is defined as `(last_activity_timestamp - first_activity_timestamp + 1)`.
+
+Return a list of these total durations for all sessions, in the order they conclude.
  * 
  * Examples:
- * [object Object],[object Object],[object Object],[object Object]
+ * [object Object],[object Object],[object Object]
  * 
  * Constraints:
- * [object Object]
+ * 1 <= len(timestamps) <= 10^5,1 <= timestamps[i] <= 10^9,`timestamps` is sorted in ascending order and contains unique elements.,0 <= max_inactive_duration <= 10^9
  * 
  * Difficulty: Medium
  */
 
-/**
- * Represents a single log entry.
- * @interface
- */
-interface LogEntry {
-  /** The timestamp of the log entry (e.g., Unix timestamp, milliseconds since epoch). */
-  timestamp: number;
-  /** The message associated with the log entry. */
-  message: string;
-}
+To solve the Activity Session Durations problem, we need to iterate through the sorted list of timestamps and maintain state about the current session.
 
-/**
- * Represents an aggregated block of consecutive log entries sharing the same message.
- * @interface
- */
-interface AggregatedBlock {
-  /** The common message for all entries within this block. */
-  message: string;
-  /** The timestamp of the first log entry in this block. */
-  startTime: number;
-  /** The timestamp of the last log entry in this block. */
-  endTime: number;
-  /** The duration of the block, calculated as `endTime - startTime`. */
-  duration: number;
-}
+**Approach:**
 
-/**
- * Aggregates a chronologically ordered list of log entries into blocks.
- * Consecutive log entries that share the exact same message are grouped into a single block.
- * Each block records the common message, its start time, end time, and total duration.
- *
- * @param {LogEntry[]} logs - A chronologically ordered list of log entries.
- * @returns {AggregatedBlock[]} A list of aggregated log blocks.
- */
-function aggregateLogEntries(logs: LogEntry[]): AggregatedBlock[] {
-  const aggregatedBlocks: AggregatedBlock[] = [];
+1.  **Initialization**:
+    *   We'll use an array `sessionDurations` to store the calculated durations.
+    *   If the input `timestamps` array is empty, return an empty `sessionDurations` array immediately.
+    *   For the first activity (at `timestamps[0]`), it always starts a new session. We store this as `currentSessionStartTime`.
+    *   We also need to track the `previousActivityTimeInCurrentSession` to check for gaps. Initially, this is also `timestamps[0]`.
 
-  // Handle empty input list gracefully.
-  if (logs.length === 0) {
-    return aggregatedBlocks;
-  }
+2.  **Iterate and Group**:
+    *   Loop through the `timestamps` array starting from the second activity (`i = 1`).
+    *   For each `currentActivityTime`, calculate the gap with the `previousActivityTimeInCurrentSession`.
+    *   **Condition for New Session**: If `(currentActivityTime - previousActivityTimeInCurrentSession)` is `> max_inactive_duration`, it means the current activity begins a new session.
+        *   Before starting a new session, the *previous* session has just concluded. Calculate its duration using `(previousActivityTimeInCurrentSession - currentSessionStartTime + 1)` and add it to `sessionDurations`.
+        *   Then, reset `currentSessionStartTime` to the `currentActivityTime`.
+    *   **Update Previous Activity**: Regardless of whether a new session started or not, update `previousActivityTimeInCurrentSession` to `currentActivityTime`. This ensures that for the next iteration, we compare with the most recent activity within the ongoing session.
 
-  // Initialize the first block with the first log entry.
-  let currentBlock: AggregatedBlock = {
-    message: logs[0].message,
-    startTime: logs[0].timestamp,
-    endTime: logs[0].timestamp,
-    duration: 0, // Duration will be calculated when the block is finalized.
-  };
+3.  **Final Session**:
+    *   After the loop finishes, there will always be one uncompleted session (the last one being built). Calculate its duration using the final `previousActivityTimeInCurrentSession` (which will be `timestamps[timestamps.length - 1]`) and the `currentSessionStartTime` for that last session. Add this duration to `sessionDurations`.
 
-  // Iterate through the log entries starting from the second one.
-  for (let i = 1; i < logs.length; i++) {
-    const entry = logs[i];
+4.  **Return**: Return the `sessionDurations` array.
 
-    // If the current entry's message matches the current block's message, extend the block.
-    if (entry.message === currentBlock.message) {
-      currentBlock.endTime = entry.timestamp;
-    } else {
-      // If the message is different, the current block has ended.
-      // Finalize its duration and add it to the results.
-      currentBlock.duration = currentBlock.endTime - currentBlock.startTime;
-      aggregatedBlocks.push(currentBlock);
+**Time Complexity:**
+The algorithm processes each timestamp exactly once in a single loop. Each operation inside the loop (subtraction, comparison, assignment, array push) takes constant time. Therefore, the time complexity is O(N), where N is the number of timestamps.
 
-      // Start a new block with the current entry.
-      currentBlock = {
-        message: entry.message,
-        startTime: entry.timestamp,
-        endTime: entry.timestamp,
-        duration: 0,
-      };
+**Space Complexity:**
+We store the calculated session durations in the `sessionDurations` array. In the worst case (e.g., when `max_inactive_duration` is 0), each activity forms its own session, resulting in N durations. Thus, the space complexity is O(N) for storing the results. Excluding the output space, the auxiliary space used is O(1) as we only keep track of a few variables.
+
+function getSessionDurations(timestamps: number[], max_inactive_duration: number): number[] {
+    const sessionDurations: number[] = [];
+
+    // Edge case: If there are no activities, no sessions can be formed.
+    if (timestamps.length === 0) {
+        return sessionDurations;
     }
-  }
 
-  // After the loop, add the very last block to the results.
-  // Its duration needs to be calculated before pushing.
-  currentBlock.duration = currentBlock.endTime - currentBlock.startTime;
-  aggregatedBlocks.push(currentBlock);
+    // The first activity always starts a new session.
+    let currentSessionStartTime: number = timestamps[0];
+    // This tracks the timestamp of the last activity within the *current* session being built.
+    // It's used to check the gap for the *next* incoming activity.
+    let previousActivityTimeInCurrentSession: number = timestamps[0];
 
-  return aggregatedBlocks;
+    // Iterate through the timestamps starting from the second activity.
+    for (let i = 1; i < timestamps.length; i++) {
+        const currentActivityTime: number = timestamps[i];
+
+        // Condition for starting a new session:
+        // The gap between the current activity and the immediately preceding activity
+        // in the current session is *more than* max_inactive_duration.
+        if (currentActivityTime - previousActivityTimeInCurrentSession > max_inactive_duration) {
+            // A new session is about to begin, so the current session has concluded.
+            // Calculate and store its duration.
+            const sessionDuration = previousActivityTimeInCurrentSession - currentSessionStartTime + 1;
+            sessionDurations.push(sessionDuration);
+
+            // Start a new session with the current activity.
+            currentSessionStartTime = currentActivityTime;
+        }
+        
+        // Update the previous activity time for the *current* (or newly started) session.
+        // This activity is now the latest one considered for the session in progress.
+        previousActivityTimeInCurrentSession = currentActivityTime;
+    }
+
+    // After the loop, there will always be one session that hasn't been added to `sessionDurations` yet
+    // (the very last session that was active or newly started at the end of the input).
+    // Calculate its duration and add it to the results.
+    const lastSessionDuration = previousActivityTimeInCurrentSession - currentSessionStartTime + 1;
+    sessionDurations.push(lastSessionDuration);
+
+    return sessionDurations;
 }
 
-// --- Test Cases ---
+// Test Cases
+function runTests() {
+    console.log("Running tests...");
 
-function assertDeepEqual(actual: any, expected: any, message: string) {
-  const actualStr = JSON.stringify(actual);
-  const expectedStr = JSON.stringify(expected);
-  if (actualStr !== expectedStr) {
-    console.error(`❌ FAIL: ${message}`);
-    console.error(`   Expected: ${expectedStr}`);
-    console.error(`   Actual:   ${actualStr}`);
-  } else {
-    console.log(`✅ PASS: ${message}`);
-  }
+    // Helper function for asserting array equality in tests
+    function assertArrayEquals(actual: number[], expected: number[], message: string) {
+        if (actual.length !== expected.length || !actual.every((val, i) => val === expected[i])) {
+            console.error(`FAIL: ${message}`);
+            console.error(`  Expected: [${expected}]`);
+            console.error(`  Actual:   [${actual}]`);
+        } else {
+            console.log(`PASS: ${message}`);
+        }
+    }
+
+    // Example 1 from problem description
+    assertArrayEquals(
+        getSessionDurations([1, 2, 3, 7, 8, 12, 13, 14], 2),
+        [3, 2, 3],
+        "Example 1: Mixed gaps, multiple sessions"
+    );
+
+    // Example 2 from problem description
+    assertArrayEquals(
+        getSessionDurations([10, 20, 30, 40], 5),
+        [1, 1, 1, 1], // Gaps are 10, all > 5. Each activity is a session.
+        "Example 2: All activities far apart, small max_inactive_duration"
+    );
+
+    // Example 3 from problem description
+    assertArrayEquals(
+        getSessionDurations([100, 105, 110, 115], 10),
+        [16], // Gaps are 5, all <= 10. All activities form one session. (115 - 100 + 1)
+        "Example 3: All activities within one session, large enough max_inactive_duration"
+    );
+
+    // Additional Test Cases
+
+    // Case 1: Empty timestamps array
+    assertArrayEquals(
+        getSessionDurations([], 100),
+        [],
+        "Case 1: Empty timestamps array"
+    );
+
+    // Case 2: Single timestamp
+    assertArrayEquals(
+        getSessionDurations([50], 0),
+        [1],
+        "Case 2: Single timestamp (duration is 1)"
+    );
+
+    // Case 3: max_inactive_duration = 0 (any gap > 0 starts new session)
+    assertArrayEquals(
+        getSessionDurations([1, 2, 3, 4], 0),
+        [1, 1, 1, 1], // Gaps are 1, all > 0. Each activity is a session.
+        "Case 3: max_inactive_duration = 0, all separate sessions"
+    );
+
+    // Case 4: Very large max_inactive_duration (all activities should be in one session)
+    assertArrayEquals(
+        getSessionDurations([1, 5, 10, 15], 1000),
+        [15], // (15 - 1 + 1)
+        "Case 4: Very large max_inactive_duration, all activities in a single session"
+    );
+
+    // Case 5: Timestamps with varying gaps and strict max_inactive_duration
+    assertArrayEquals(
+        getSessionDurations([1, 5, 6, 7, 12, 15, 16, 20], 3),
+        [1, 3, 5, 1],
+        "Case 5: Timestamps with varying gaps and strict max_inactive_duration (gaps: 4,1,1,5,3,1,4)"
+        // Trace:
+        // [1] -> Gap 4 (>3) -> Session [1] duration 1. New session [5]
+        // [5,6,7] -> Gap 5 (>3) -> Session [5,6,7] duration (7-5+1)=3. New session [12]
+        // [12,15,16] -> Gap 4 (>3) -> Session [12,15,16] duration (16-12+1)=5. New session [20]
+        // [20] -> End of input -> Session [20] duration 1.
+    );
+
+    // Case 6: Boundary condition - gap is exactly equal to max_inactive_duration (should NOT break session)
+    assertArrayEquals(
+        getSessionDurations([1, 3, 5, 7], 2),
+        [7], // Gaps are 2, 2, 2. None are > 2. All form one session (7-1+1).
+        "Case 6: Gap exactly equals max_inactive_duration (should not break session)"
+    );
+
+    // Case 7: Boundary condition - gap is just one more than max_inactive_duration (should break session)
+    assertArrayEquals(
+        getSessionDurations([1, 4, 7, 10], 2),
+        [1, 1, 1, 1], // Gaps are 3, 3, 3. All are > 2. Each activity forms a session.
+        "Case 7: Gap just more than max_inactive_duration (should break session)"
+    );
+
+    console.log("All tests finished.");
 }
 
-console.log("--- Running Test Cases ---");
-
-// Test Case 1: Empty list
-const testLogs1: LogEntry[] = [];
-const expected1: AggregatedBlock[] = [];
-assertDeepEqual(aggregateLogEntries(testLogs1), expected1, "should return an empty array for an empty input list");
-
-// Test Case 2: Single log entry
-const testLogs2: LogEntry[] = [
-  { timestamp: 100, message: "Server started" },
-];
-const expected2: AggregatedBlock[] = [
-  { message: "Server started", startTime: 100, endTime: 100, duration: 0 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs2), expected2, "should correctly aggregate a single log entry");
-
-// Test Case 3: Multiple entries with the same message
-const testLogs3: LogEntry[] = [
-  { timestamp: 100, message: "Heartbeat" },
-  { timestamp: 105, message: "Heartbeat" },
-  { timestamp: 110, message: "Heartbeat" },
-];
-const expected3: AggregatedBlock[] = [
-  { message: "Heartbeat", startTime: 100, endTime: 110, duration: 10 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs3), expected3, "should aggregate multiple consecutive identical messages into one block");
-
-// Test Case 4: Multiple entries with different messages (each forms its own block)
-const testLogs4: LogEntry[] = [
-  { timestamp: 100, message: "A" },
-  { timestamp: 101, message: "B" },
-  { timestamp: 102, message: "C" },
-];
-const expected4: AggregatedBlock[] = [
-  { message: "A", startTime: 100, endTime: 100, duration: 0 },
-  { message: "B", startTime: 101, endTime: 101, duration: 0 },
-  { message: "C", startTime: 102, endTime: 102, duration: 0 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs4), expected4, "should create a new block for each different message");
-
-// Test Case 5: Mixed messages, some consecutive, some distinct
-const testLogs5: LogEntry[] = [
-  { timestamp: 100, message: "Processing request" },
-  { timestamp: 105, message: "Processing request" },
-  { timestamp: 110, message: "Database query" },
-  { timestamp: 115, message: "Processing request" },
-  { timestamp: 120, message: "Processing request" },
-  { timestamp: 125, message: "Finished" },
-];
-const expected5: AggregatedBlock[] = [
-  { message: "Processing request", startTime: 100, endTime: 105, duration: 5 },
-  { message: "Database query", startTime: 110, endTime: 110, duration: 0 },
-  { message: "Processing request", startTime: 115, endTime: 120, duration: 5 },
-  { message: "Finished", startTime: 125, endTime: 125, duration: 0 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs5), expected5, "should correctly aggregate mixed consecutive and distinct messages");
-
-// Test Case 6: Messages with leading/trailing spaces (should be treated as different)
-const testLogs6: LogEntry[] = [
-  { timestamp: 100, message: " Message " },
-  { timestamp: 105, message: "Message" },
-  { timestamp: 110, message: " Message " },
-];
-const expected6: AggregatedBlock[] = [
-  { message: " Message ", startTime: 100, endTime: 100, duration: 0 },
-  { message: "Message", startTime: 105, endTime: 105, duration: 0 },
-  { message: " Message ", startTime: 110, endTime: 110, duration: 0 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs6), expected6, "should distinguish messages based on exact string match, including spaces");
-
-// Test Case 7: Longer sequence of identical messages
-const testLogs7: LogEntry[] = [
-  { timestamp: 1, message: "Keepalive" },
-  { timestamp: 2, message: "Keepalive" },
-  { timestamp: 3, message: "Keepalive" },
-  { timestamp: 4, message: "Keepalive" },
-  { timestamp: 5, message: "Keepalive" },
-];
-const expected7: AggregatedBlock[] = [
-  { message: "Keepalive", startTime: 1, endTime: 5, duration: 4 },
-];
-assertDeepEqual(aggregateLogEntries(testLogs7), expected7, "should handle a long sequence of identical messages");
-
-console.log("--- End of Test Cases ---");
-
-
-/**
- * Brief Explanation of the Approach:
- *
- * The solution uses a single pass (iteration) through the chronologically ordered list of log entries.
- * It maintains a `currentBlock` object which represents the block being actively built.
- *
- * 1.  Initialization:
- *     - If the input `logs` array is empty, an empty array is returned immediately.
- *     - Otherwise, the `currentBlock` is initialized using the very first log entry. Its `startTime` and `endTime` are both set to the first entry's timestamp, and `duration` is temporarily 0.
- *
- * 2.  Iteration:
- *     - The algorithm then iterates from the second log entry (`i = 1`) to the end of the list.
- *     - For each `entry`:
- *         - If `entry.message` is *the same as* `currentBlock.message`:
- *             - The `currentBlock` is extended by simply updating its `endTime` to the `entry.timestamp`.
- *         - If `entry.message` is *different from* `currentBlock.message`:
- *             - This signifies the end of the `currentBlock`. Its `duration` is calculated (`endTime - startTime`).
- *             - The finalized `currentBlock` is added to the `aggregatedBlocks` result array.
- *             - A *new* `currentBlock` is then started, initialized with the current `entry`'s message, `startTime`, and `endTime` (both set to `entry.timestamp`).
- *
- * 3.  Finalization:
- *     - After the loop finishes, there will always be one last `currentBlock` that has not yet been added to the `aggregatedBlocks` array.
- *     - Its `duration` is calculated, and it is pushed into the `aggregatedBlocks` array.
- *     - The `aggregatedBlocks` array is then returned.
- */
-
-/**
- * Time and Space Complexity Analysis:
- *
- * Time Complexity: O(N)
- * - The algorithm iterates through the input `logs` array exactly once.
- * - Inside the loop, all operations (comparisons, assignments, object property access, object creation) take constant time, O(1).
- * - Therefore, the total time complexity is directly proportional to the number of log entries, N.
- *
- * Space Complexity: O(N)
- * - In the worst-case scenario, every log entry has a unique message, or messages alternate frequently (e.g., A, B, A, B...). In this case, each log entry will result in a new `AggregatedBlock` being created and stored in the `aggregatedBlocks` array.
- * - The `aggregatedBlocks` array can grow up to a size of N (where N is the number of input log entries).
- * - Each `AggregatedBlock` object stores a string (message) and three numbers (`startTime`, `endTime`, `duration`). The space for these is constant per block (assuming message string storage is amortized or relatively small compared to N).
- * - Hence, the total space required for the output array and `currentBlock` variable is proportional to the number of input log entries.
- */
+// Uncomment the line below to run the tests
+runTests();
 
 // Run the solution
 console.log('Running daily challenge solution...');
