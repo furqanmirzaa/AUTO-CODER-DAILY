@@ -182,3 +182,191 @@ function solve(task_durations: number[], num_workers: number): number {
     // After all tasks have been processed, maxCompletionTime holds the time the last task finished.
     return maxCompletionTime;
 }
+
+// ── Stage 2 ──
+/*
+  The problem asks us to simulate task assignment to a pool of workers and find the final completion time of all tasks.
+  Tasks are processed sequentially from `task_durations`.
+  Each task is assigned to the worker who becomes free earliest. In case of a tie (multiple workers free at the same earliest time), the worker with the lowest ID (0-indexed) is chosen.
+  Initially, all workers are free at time 0.
+
+  To efficiently find the earliest free worker, a min-priority queue (min-heap) is the ideal data structure.
+  Each element in the priority queue will represent a worker, storing their `[free_time, worker_id]`.
+  The priority queue should order elements primarily by `free_time` (ascending) and secondarily by `worker_id` (ascending) for tie-breaking.
+
+  Algorithm:
+  1. Initialize a min-priority queue. Populate it with `num_workers` entries, each `[0, i]` for `i` from `0` to `num_workers - 1` (worker `i` is free at time `0`).
+  2. Initialize `finalCompletionTime = 0`.
+  3. Iterate through each `task_duration` in `task_durations`:
+     a. Extract the worker `[worker_free_time, worker_id]` with the minimum `free_time` (and lowest `worker_id` for ties) from the priority queue.
+     b. Calculate the new time this worker will become free after completing the current task: `new_worker_free_time = worker_free_time + task_duration`.
+     c. Update `finalCompletionTime = Math.max(finalCompletionTime, new_worker_free_time)`. This ensures `finalCompletionTime` always tracks the completion time of the task that finishes latest so far.
+     d. Insert the worker back into the priority queue with their updated free time: `[new_worker_free_time, worker_id]`.
+  4. After processing all tasks, `finalCompletionTime` will hold the maximum of all individual task completion times, which is the overall final completion time.
+
+  Time Complexity:
+  - Initializing the priority queue: `O(num_workers * log(num_workers))`.
+  - Processing each task: For each of `len(task_durations)` tasks, we perform `extractMin` and `insert` operations on the priority queue, each taking `O(log(num_workers))` time.
+    Total for tasks: `O(len(task_durations) * log(num_workers))`.
+  - Overall: `O(num_workers * log(num_workers) + len(task_durations) * log(num_workers))`.
+  Given the constraints (up to 10^5 for both `num_workers` and `len(task_durations)`), this complexity is efficient enough.
+
+  Space Complexity:
+  - `O(num_workers)` for storing worker states in the priority queue.
+*/
+
+// A minimal Min-Priority Queue (Min-Heap) implementation.
+// It stores elements and orders them based on a provided comparison function.
+class PriorityQueue<T> {
+    private heap: T[] = [];
+    private compare: (a: T, b: T) => number; // Returns <0 if a<b, >0 if a>b, 0 if a==b
+
+    /**
+     * Creates a new PriorityQueue.
+     * @param compareFn A comparison function that defines the order of elements.
+     *                  It should return a negative value if `a` comes before `b`, 
+     *                  a positive value if `a` comes after `b`, or `0` if they are equivalent.
+     */
+    constructor(compareFn: (a: T, b: T) => number) {
+        this.compare = compareFn;
+    }
+
+    // Helper methods to get parent, left, and right child indices
+    private parent(i: number): number { return Math.floor((i - 1) / 2); }
+    private left(i: number): number { return 2 * i + 1; }
+    private right(i: number): number { return 2 * i + 2; }
+
+    // Swaps two elements in the heap array
+    private swap(i: number, j: number) {
+        [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+    }
+
+    // Restores heap property by moving an element up the heap (used after insertion)
+    private heapifyUp(index: number) {
+        let currentIndex = index;
+        // While current element is not root and is smaller than its parent
+        while (currentIndex > 0 && this.compare(this.heap[currentIndex], this.heap[this.parent(currentIndex)]) < 0) {
+            this.swap(currentIndex, this.parent(currentIndex));
+            currentIndex = this.parent(currentIndex);
+        }
+    }
+
+    // Restores heap property by moving an element down the heap (used after extraction)
+    private heapifyDown(index: number) {
+        let currentIndex = index;
+        let leftChildIndex = this.left(currentIndex);
+        let rightChildIndex = this.right(currentIndex);
+        let smallestChildIndex = currentIndex; // Assume current is smallest initially
+
+        // Check if left child exists and is smaller than current smallest
+        if (leftChildIndex < this.heap.length && this.compare(this.heap[leftChildIndex], this.heap[smallestChildIndex]) < 0) {
+            smallestChildIndex = leftChildIndex;
+        }
+        // Check if right child exists and is smaller than current smallest
+        if (rightChildIndex < this.heap.length && this.compare(this.heap[rightChildIndex], this.heap[smallestChildIndex]) < 0) {
+            smallestChildIndex = rightChildIndex;
+        }
+
+        // If the smallest is not the current element, swap and continue heapifying down
+        if (smallestChildIndex !== currentIndex) {
+            this.swap(currentIndex, smallestChildIndex);
+            this.heapifyDown(smallestChildIndex);
+        }
+    }
+
+    /**
+     * Adds an element to the priority queue.
+     * @param item The element to add.
+     */
+    insert(item: T) {
+        this.heap.push(item);
+        this.heapifyUp(this.heap.length - 1);
+    }
+
+    /**
+     * Removes and returns the smallest element from the priority queue.
+     * @returns The smallest element, or `undefined` if the queue is empty.
+     */
+    extractMin(): T | undefined {
+        if (this.heap.length === 0) {
+            return undefined;
+        }
+        if (this.heap.length === 1) {
+            return this.heap.pop(); // Only one element, just remove it
+        }
+
+        const min = this.heap[0]; // The smallest element is at the root
+        this.heap[0] = this.heap.pop()!; // Move the last element to the root
+        this.heapifyDown(0); // Restore heap property from the root
+        return min;
+    }
+
+    /**
+     * Returns the smallest element without removing it.
+     * @returns The smallest element, or `undefined` if the queue is empty.
+     */
+    peekMin(): T | undefined {
+        return this.heap.length > 0 ? this.heap[0] : undefined;
+    }
+
+    /**
+     * Checks if the priority queue is empty.
+     * @returns `true` if the queue is empty, `false` otherwise.
+     */
+    isEmpty(): boolean {
+        return this.heap.length === 0;
+    }
+
+    /**
+     * Returns the number of elements in the priority queue.
+     * @returns The size of the queue.
+     */
+    size(): number {
+        return this.heap.length;
+    }
+}
+
+function solve(task_durations: number[], num_workers: number): number {
+    // Define the comparison function for worker objects in the priority queue.
+    // Each worker object is a tuple: [worker_free_time, worker_id].
+    // We want to prioritize workers who become free earliest (lower worker_free_time).
+    // If free times are equal, prioritize workers with lower IDs.
+    const workerComparator = (a: [number, number], b: [number, number]): number => {
+        if (a[0] !== b[0]) {
+            return a[0] - b[0]; // Sort by free_time in ascending order
+        }
+        return a[1] - b[1]; // If free_time is equal, sort by worker_id in ascending order
+    };
+
+    // Initialize the priority queue with all workers.
+    // Initially, all workers are free at time 0.
+    const workerQueue = new PriorityQueue<[number, number]>(workerComparator);
+    for (let i = 0; i < num_workers; i++) {
+        workerQueue.insert([0, i]); // Worker 'i' is free at time 0
+    }
+
+    let finalCompletionTime = 0; // Tracks the completion time of the last task finished overall
+
+    // Process each task in the given order.
+    for (const duration of task_durations) {
+        // 1. Get the worker who will be free earliest (and has the lowest ID in case of ties).
+        // The '!' is used to assert that extractMin will not return undefined here because
+        // problem constraints guarantee `num_workers >= 1` and tasks are being processed.
+        const [worker_free_time, worker_id] = workerQueue.extractMin()!;
+
+        // 2. Calculate when this worker will finish the current task.
+        // This worker starts the task at `worker_free_time` and finishes after `duration`.
+        const new_worker_free_time = worker_free_time + duration;
+
+        // 3. Update the overall final completion time.
+        // This variable keeps track of the maximum completion time among all tasks processed so far.
+        finalCompletionTime = Math.max(finalCompletionTime, new_worker_free_time);
+
+        // 4. Put the worker back into the priority queue with their updated (later) free time.
+        workerQueue.insert([new_worker_free_time, worker_id]);
+    }
+
+    // After all tasks are assigned and processed, `finalCompletionTime` will hold
+    // the completion time of the task that finished last, which is the overall solution.
+    return finalCompletionTime;
+}
