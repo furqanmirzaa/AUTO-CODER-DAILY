@@ -1,141 +1,184 @@
 /**
  * Daily Coding Challenge: 2025-12-09
- * Problem: Event Sequence Anomaly Detector
+ * Problem: Distributed Task Completion
  *
  * Description:
- * You are tasked with building a system to detect unusual activity patterns in application logs. Each log entry records a specific user performing an action at a certain time. An anomaly is defined as a user performing a *minimum number* of *distinct event types* within a *specific time window*.
+ * You are given a list of `task_durations` representing the time required to complete each task. You also have `num_workers` available. Tasks are processed in the order they appear in `task_durations`.
 
-Your program should process a stream of log entries (which are not necessarily sorted by timestamp, but will be processed effectively as if they were). For each log entry, you should update the user's activity history. If processing any log entry causes a user to meet the anomaly criteria, that user should be identified and added to a list of anomalous users.
+When a task needs to be processed, it is immediately assigned to the worker who will become free *earliest*. If multiple workers become free at the same earliest time, the one with the *lowest worker ID* (0-indexed) is chosen. Initially, all `num_workers` are free at time `0`.
 
-Once a user is identified as anomalous, they should not be reported again for subsequent anomalies.
-
-**Input:**
-- `logs`: A list of strings, where each string represents a log entry in the format "timestamp,user_id,event_type".
-  - `timestamp`: Integer, seconds since epoch.
-  - `user_id`: String.
-  - `event_type`: String.
-- `window_seconds`: Integer, the size of the time window in seconds.
-- `min_distinct_events`: Integer, the minimum number of distinct event types required to trigger an anomaly.
-
-**Output:**
-- A list of `user_id`s who have exhibited anomalous behavior, sorted alphabetically. Each user should appear only once in the output, even if they have multiple anomalous sequences.
+Your goal is to calculate the final completion time of *all tasks*. This is the moment the last worker finishes their last assigned task.
  *
  * Examples:
  * [object Object],[object Object]
  * 
  * Constraints:
- * 1 <= len(logs) <= 10^5,Each log entry is a string "timestamp,user_id,event_type".,timestamp: integer, 1 <= timestamp <= 10^9,user_id: string, alphanumeric, 1 <= len(user_id) <= 20,event_type: string, alphanumeric, 1 <= len(event_type) <= 30,1 <= window_seconds <= 10^9,1 <= min_distinct_events <= 100,The input `logs` list is not guaranteed to be sorted by timestamp. Your solution should correctly handle this (e.g., by sorting logs first, or by using appropriate data structures for each user).,Output `user_id`s should be sorted alphabetically and unique.
+ * 1 <= len(task_durations) <= 10^5,1 <= task_durations[i] <= 1000,1 <= num_workers <= 10^5,num_workers <= len(task_durations) (to ensure all workers are potentially used or tasks are sufficient)
  *
  * Difficulty: Medium
  */
 
 // ── Stage 1 ──
-interface LogEntry {
-    timestamp: number;
-    userId: string;
-    eventType: string;
-}
+/*
+ * The problem requires us to simulate task assignment to workers to find the final completion time of all tasks.
+ * Tasks are processed in order, and each task is assigned to the worker who becomes free earliest.
+ * If multiple workers become free at the same earliest time, the worker with the lowest ID is chosen.
+ * All workers initially become free at time 0.
+ *
+ * This problem can be efficiently solved using a Min-Priority Queue (Min-Heap).
+ * Each element in the heap will represent a worker and store their next available time and their ID.
+ * The priority of an element in the heap will be determined first by the worker's available time (earliest first),
+ * and then by their worker ID (lowest ID first) in case of a tie in available times.
+ *
+ * Algorithm:
+ * 1. Initialize a Min-Heap. For each of the `num_workers` workers, add an entry `[0, worker_id]` to the heap.
+ *    This signifies that all workers are initially free at time 0.
+ * 2. Initialize `maxCompletionTime = 0`. This variable will track the completion time of the last task finished.
+ * 3. Iterate through each `task_duration` in the `task_durations` list:
+ *    a. Extract the worker `[workerFreeTime, workerId]` with the highest priority (earliest free time, lowest ID) from the heap.
+ *    b. The current task will start at `workerFreeTime`.
+ *    c. Calculate the `taskCompletionTime` for this task: `workerFreeTime + current_task_duration`.
+ *    d. Update `maxCompletionTime = Math.max(maxCompletionTime, taskCompletionTime)`. This ensures we keep track of when the absolute last task finishes.
+ *    e. Re-add the worker back to the heap with their new availability time: `[taskCompletionTime, workerId]`.
+ * 4. After processing all tasks, `maxCompletionTime` will hold the final completion time of all tasks.
+ *
+ * Time Complexity:
+ * - Initialization: `O(num_workers * log(num_workers))` to push all workers into the heap.
+ * - Task processing: `len(task_durations)` iterations. In each iteration, we perform one `pop` and one `push` operation on the heap.
+ *   Each heap operation takes `O(log(num_workers))` time.
+ * - Total time complexity: `O(num_workers * log(num_workers) + len(task_durations) * log(num_workers))`. Since `num_workers <= len(task_durations)`,
+ *   this simplifies to `O(len(task_durations) * log(num_workers))`.
+ *   Given `len(task_durations)` up to `10^5` and `num_workers` up to `10^5`, `10^5 * log(10^5)` is approximately `10^5 * 17`, which is efficient enough.
+ *
+ * Space Complexity:
+ * - `O(num_workers)` to store the worker states in the heap.
+ */
 
-interface UserActivityState {
-    // Stores all relevant events for a user, sorted by timestamp.
-    // Since parsedLogs are sorted globally, adding to this array maintains per-user chronological order.
-    events: LogEntry[];
-    
-    // Index of the first event in 'events' that is potentially within the current active time window.
-    // This pointer allows efficient 'pruning' of old events without shifting array elements.
-    windowStartIndex: number;
-}
+// MinHeap class to manage worker availability
+// Each element in the heap is a tuple: [available_time, worker_id]
+class MinHeap {
+    heap: [number, number][];
 
-function detectAnomaly(
-    logs: string[],
-    window_seconds: number,
-    min_distinct_events: number
-): string[] {
-    // 1. Parse and Sort Logs
-    // It is crucial to sort all log entries by timestamp first because the input 'logs' list is not guaranteed to be sorted.
-    // This ensures that when we process events for a user, we consider them in chronological order across all users,
-    // which is vital for correctly managing time windows.
-    const parsedLogs: LogEntry[] = logs.map(log => {
-        const parts = log.split(',');
-        return {
-            timestamp: parseInt(parts[0], 10), // Parse timestamp as an integer
-            userId: parts[1],
-            eventType: parts[2],
-        };
-    });
+    constructor() {
+        this.heap = [];
+    }
 
-    // Sort all log entries by their timestamp in ascending order.
-    parsedLogs.sort((a, b) => a.timestamp - b.timestamp);
-
-    // userActivity: Map to store the activity history for each user.
-    // Key: user_id (string)
-    // Value: UserActivityState object containing their events and a pointer for window management.
-    const userActivity = new Map<string, UserActivityState>();
-
-    // anomalousUsers: Set to store user_ids that have been identified as anomalous.
-    // Using a Set automatically handles uniqueness and prevents re-reporting the same user.
-    const anomalousUsers = new Set<string>();
-
-    // 2. Process Sorted Logs
-    // Iterate through each log entry in chronological order.
-    for (const logEntry of parsedLogs) {
-        const { timestamp, userId, eventType } = logEntry;
-
-        // If this user has already been identified as anomalous, skip further processing for them
-        // as per the requirement: "Once a user is identified as anomalous, they should not be reported again."
-        if (anomalousUsers.has(userId)) {
-            continue;
+    // Compares two worker tuples based on available time then worker ID.
+    // Returns true if 'a' has higher priority (smaller available time, then smaller ID) than 'b'.
+    _compare(a: [number, number], b: [number, number]): boolean {
+        if (a[0] !== b[0]) {
+            return a[0] < b[0]; // Lower available time has higher priority
         }
+        return a[1] < b[1]; // If times are equal, lower worker ID has higher priority
+    }
 
-        // Get or initialize the activity state for the current user.
-        let userState = userActivity.get(userId);
-        if (!userState) {
-            // If the user is new, create a new state object for them.
-            userState = { events: [], windowStartIndex: 0 };
-            userActivity.set(userId, userState);
-        }
+    // Swaps two elements in the heap array
+    _swap(i: number, j: number) {
+        [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+    }
 
-        // Add the current log entry to the user's history.
-        // Since the overall `parsedLogs` are sorted, pushing to `userState.events` maintains its chronological order.
-        userState.events.push(logEntry);
-
-        // Determine the start time of the current time window.
-        // Any event with a timestamp strictly less than `windowStartTime` is outside this window.
-        const windowStartTime = timestamp - window_seconds;
-
-        // 3. Prune old events from the start of the window (conceptually)
-        // Advance `windowStartIndex` past any events that are now outside the `windowStartTime`.
-        // This effectively implements a sliding window. `windowStartIndex` only moves forward,
-        // making this an amortized O(1) operation over all events for a user.
-        while (
-            userState.windowStartIndex < userState.events.length &&
-            userState.events[userState.windowStartIndex].timestamp < windowStartTime
-        ) {
-            userState.windowStartIndex++;
-        }
-
-        // 4. Count distinct event types within the current window
-        // Initialize a Set to store distinct event types. Sets automatically handle uniqueness.
-        const distinctEventTypes = new Set<string>();
-        
-        // Iterate through events for the user, starting from `windowStartIndex` (the first event in the window).
-        // and add their event types to the `distinctEventTypes` Set.
-        for (let i = userState.windowStartIndex; i < userState.events.length; i++) {
-            distinctEventTypes.add(userState.events[i].eventType);
-        }
-
-        // 5. Check for anomaly criteria
-        // If the number of distinct event types in the current window meets or exceeds `min_distinct_events`,
-        // then the user is considered anomalous.
-        if (distinctEventTypes.size >= min_distinct_events) {
-            anomalousUsers.add(userId);
+    // Restores heap property by moving an element up the tree
+    _siftUp(index: number) {
+        let parentIndex = Math.floor((index - 1) / 2);
+        // While current element has higher priority than its parent, swap them
+        while (index > 0 && this._compare(this.heap[index], this.heap[parentIndex])) {
+            this._swap(index, parentIndex);
+            index = parentIndex;
+            parentIndex = Math.floor((index - 1) / 2);
         }
     }
 
-    // 6. Prepare final output
-    // Convert the Set of anomalous user IDs to an array and sort it alphabetically
-    // as required by the problem description.
-    const result = Array.from(anomalousUsers).sort((a, b) => a.localeCompare(b));
+    // Restores heap property by moving an element down the tree
+    _siftDown(index: number) {
+        let leftChildIndex = 2 * index + 1;
+        let rightChildIndex = 2 * index + 2;
+        let smallestIndex = index;
 
-    return result;
+        // Check if left child exists and has higher priority
+        if (leftChildIndex < this.heap.length && this._compare(this.heap[leftChildIndex], this.heap[smallestIndex])) {
+            smallestIndex = leftChildIndex;
+        }
+
+        // Check if right child exists and has higher priority than current smallest
+        if (rightChildIndex < this.heap.length && this._compare(this.heap[rightChildIndex], this.heap[smallestIndex])) {
+            smallestIndex = rightChildIndex;
+        }
+
+        // If a child had higher priority, swap and continue sifting down
+        if (smallestIndex !== index) {
+            this._swap(index, smallestIndex);
+            this._siftDown(smallestIndex);
+        }
+    }
+
+    // Adds an element to the heap
+    push(value: [number, number]) {
+        this.heap.push(value);
+        this._siftUp(this.heap.length - 1);
+    }
+
+    // Removes and returns the highest priority element (root)
+    pop(): [number, number] | undefined {
+        if (this.heap.length === 0) {
+            return undefined;
+        }
+        if (this.heap.length === 1) {
+            return this.heap.pop();
+        }
+
+        const root = this.heap[0];
+        // Move the last element to the root and sift it down
+        this.heap[0] = this.heap.pop()!;
+        this._siftDown(0);
+        return root;
+    }
+
+    // Returns the highest priority element without removing it
+    peek(): [number, number] | undefined {
+        return this.heap.length > 0 ? this.heap[0] : undefined;
+    }
+
+    // Returns the number of elements in the heap
+    size(): number {
+        return this.heap.length;
+    }
+}
+
+function solve(task_durations: number[], num_workers: number): number {
+    // Initialize the MinHeap for workers.
+    const workerHeap = new MinHeap();
+
+    // Add all workers to the heap. Initially, all are free at time 0.
+    // The worker ID is important for tie-breaking when multiple workers are free at the same time.
+    for (let i = 0; i < num_workers; i++) {
+        workerHeap.push([0, i]);
+    }
+
+    // This variable will store the maximum completion time observed across all tasks.
+    // This will be the final answer.
+    let maxCompletionTime = 0;
+
+    // Process each task in the order they appear in task_durations.
+    for (const taskDuration of task_durations) {
+        // Get the worker who will be available earliest. The 'pop' operation ensures this.
+        // We use '!' to assert that pop() will not return undefined, as the heap is always populated
+        // with at least 'num_workers' elements and we only pop and immediately push back.
+        const [workerFreeTime, workerId] = workerHeap.pop()!;
+
+        // The current task starts at the time this worker becomes free.
+        const taskStartTime = workerFreeTime;
+
+        // Calculate when this task will be completed.
+        const taskCompletionTime = taskStartTime + taskDuration;
+
+        // Update the overall maximum completion time. If this task finishes later than any previous task,
+        // it becomes the new maximum.
+        maxCompletionTime = Math.max(maxCompletionTime, taskCompletionTime);
+
+        // The worker is now busy until taskCompletionTime. Add them back to the heap with their new availability.
+        workerHeap.push([taskCompletionTime, workerId]);
+    }
+
+    // After all tasks have been processed, maxCompletionTime holds the time the last task finished.
+    return maxCompletionTime;
 }
