@@ -370,3 +370,174 @@ function solve(task_durations: number[], num_workers: number): number {
     // the completion time of the task that finished last, which is the overall solution.
     return finalCompletionTime;
 }
+
+// ── Stage 3 ──
+// Define the structure for a worker in the priority queue
+interface WorkerStatus {
+    free_time: number; // The time when this worker will become free
+    worker_id: number; // The unique identifier for the worker (0-indexed)
+}
+
+// Min-Priority Queue implementation
+// This class manages a collection of WorkerStatus objects, always allowing
+// efficient retrieval of the worker who will be free earliest, breaking ties
+// by worker ID.
+class MinPriorityQueue {
+    private heap: WorkerStatus[] = []; // The underlying array that stores the heap elements
+
+    // Comparison function for heap elements.
+    // It returns a negative number if 'a' has higher priority than 'b',
+    // a positive number if 'b' has higher priority, and 0 if they are equal.
+    // Priority rules: lower free_time first, then lower worker_id.
+    private compare(a: WorkerStatus, b: WorkerStatus): number {
+        if (a.free_time !== b.free_time) {
+            return a.free_time - b.free_time;
+        }
+        // If free times are equal, prioritize the worker with the lower ID.
+        return a.worker_id - b.worker_id;
+    }
+
+    // Helper function to swap two elements in the heap array.
+    private swap(i: number, j: number) {
+        [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+    }
+
+    // Restores the heap property by moving an element upwards after insertion.
+    private bubbleUp(index: number) {
+        while (index > 0) {
+            const parentIndex = Math.floor((index - 1) / 2); // Calculate parent index
+            // If the current element has higher priority than its parent, swap them.
+            if (this.compare(this.heap[index], this.heap[parentIndex]) < 0) {
+                this.swap(index, parentIndex);
+                index = parentIndex; // Continue bubbling up from the new position
+            } else {
+                // If the heap property is satisfied, stop.
+                break;
+            }
+        }
+    }
+
+    // Restores the heap property by moving an element downwards after extraction.
+    private bubbleDown(index: number) {
+        const lastIndex = this.heap.length - 1;
+        while (true) {
+            let leftChildIndex = 2 * index + 1;
+            let rightChildIndex = 2 * index + 2;
+            let smallestIndex = index; // Assume current node is the smallest (highest priority)
+
+            // Check if left child exists and has higher priority
+            if (leftChildIndex <= lastIndex && this.compare(this.heap[leftChildIndex], this.heap[smallestIndex]) < 0) {
+                smallestIndex = leftChildIndex;
+            }
+            // Check if right child exists and has higher priority than current smallest
+            if (rightChildIndex <= lastIndex && this.compare(this.heap[rightChildIndex], this.heap[smallestIndex]) < 0) {
+                smallestIndex = rightChildIndex;
+            }
+
+            // If the smallest element is not the current element, swap them.
+            if (smallestIndex !== index) {
+                this.swap(index, smallestIndex);
+                index = smallestIndex; // Continue bubbling down from the new position
+            } else {
+                // If the current element is the smallest, stop.
+                break;
+            }
+        }
+    }
+
+    // Adds a new element to the priority queue.
+    push(item: WorkerStatus) {
+        this.heap.push(item); // Add to the end
+        this.bubbleUp(this.heap.length - 1); // Restore heap property
+    }
+
+    // Removes and returns the element with the highest priority (smallest free_time, then worker_id).
+    pop(): WorkerStatus | undefined {
+        if (this.heap.length === 0) {
+            return undefined; // Queue is empty
+        }
+        if (this.heap.length === 1) {
+            return this.heap.pop(); // Only one element, just remove it
+        }
+
+        const root = this.heap[0]; // The element to be returned
+        this.heap[0] = this.heap.pop()!; // Move the last element to the root
+        this.bubbleDown(0); // Restore heap property from the root
+        return root;
+    }
+
+    // Returns the element with the highest priority without removing it.
+    peek(): WorkerStatus | undefined {
+        return this.heap.length > 0 ? this.heap[0] : undefined;
+    }
+
+    // Returns the current number of elements in the queue.
+    size(): number {
+        return this.heap.length;
+    }
+}
+
+/**
+ * Calculates the final completion time of all tasks given their durations and number of workers.
+ * Tasks are assigned to the earliest free worker, with tie-breaking by lowest worker ID.
+ *
+ * @param task_durations A list of numbers representing the time required for each task.
+ * @param num_workers The total number of available workers.
+ * @returns The final time when the last task is completed.
+ */
+function solve(task_durations: number[], num_workers: number): number {
+    // Initialize a min-priority queue to keep track of worker availability.
+    // The queue will store WorkerStatus objects ({ free_time, worker_id }).
+    // It automatically orders workers by their free_time (earliest first),
+    // and then by worker_id (lowest first) for tie-breaking.
+    const workerQueue = new MinPriorityQueue();
+
+    // Initially, all `num_workers` are free at time `0`.
+    // Add each worker to the priority queue.
+    for (let i = 0; i < num_workers; i++) {
+        workerQueue.push({ free_time: 0, worker_id: i });
+    }
+
+    // This variable will store the maximum completion time encountered among all tasks.
+    // It represents the moment the very last task finishes.
+    let finalCompletionTime = 0;
+
+    // Process each task in the order they appear in `task_durations`.
+    for (const duration of task_durations) {
+        // 1. Get the worker who will become free *earliest*.
+        // This is done by popping the top element from the min-priority queue.
+        const earliestWorker = workerQueue.pop();
+
+        // Safety check: In a valid problem scenario, there should always be a worker
+        // as tasks are processed sequentially and workers are re-added. This error
+        // indicates an unexpected state, e.g., queue became empty mid-processing.
+        // Given the problem constraints (`num_workers <= len(task_durations)`), this
+        // branch should not be reachable unless the input is invalid (e.g., empty num_workers).
+        if (!earliestWorker) {
+            throw new Error("Logic error: No workers available for tasks.");
+        }
+
+        // 2. Determine the start time for the current task.
+        // The task starts immediately when the assigned worker becomes free.
+        const taskStartTime = earliestWorker.free_time;
+
+        // 3. Calculate the completion time for the current task.
+        const taskCompletionTime = taskStartTime + duration;
+
+        // 4. Update the worker's status and re-add them to the queue.
+        // This worker is now busy until `taskCompletionTime`.
+        workerQueue.push({
+            free_time: taskCompletionTime,
+            worker_id: earliestWorker.worker_id,
+        });
+
+        // 5. Update the overall `finalCompletionTime`.
+        // The final completion time of *all tasks* is the completion time of the last task
+        // to finish. We track this by taking the maximum of all individual task completion times.
+        finalCompletionTime = Math.max(finalCompletionTime, taskCompletionTime);
+    }
+
+    // After all tasks have been processed, `finalCompletionTime` holds the moment
+    // the last worker finishes their last assigned task.
+    return finalCompletionTime;
+}
