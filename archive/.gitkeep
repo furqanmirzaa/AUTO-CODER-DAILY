@@ -1,0 +1,18 @@
+# Archive Directory
+
+This directory contains archived tasks from previous months.
+
+## Structure
+
+```
+archive/
+└── YYYY-MM/
+    └── YYYY-MM-DD/
+        ├── problem.md
+        ├── solution-step-*.ts
+        └── solution-final.ts
+```
+
+## Note
+
+Tasks are automatically archived on the 1st of each month.
