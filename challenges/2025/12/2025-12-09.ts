@@ -1,172 +1,141 @@
 /**
  * Daily Coding Challenge: 2025-12-09
- * Problem: Contextual Log Session Extractor
+ * Problem: Event Sequence Anomaly Detector
  *
  * Description:
- * You are tasked with processing a list of raw log entries to extract specific 'sessions' and then filter them based on a keyword. A session begins with a log entry containing the marker `[SESSION_START]` and ends with a log entry containing `[SESSION_END]`. All log entries within this range, including the start and end markers, belong to that session.
+ * You are tasked with building a system to detect unusual activity patterns in application logs. Each log entry records a specific user performing an action at a certain time. An anomaly is defined as a user performing a *minimum number* of *distinct event types* within a *specific time window*.
 
-Here are the rules for session demarcation:
-1.  If `[SESSION_START]` is encountered while not currently in a session, a new session begins.
-2.  If `[SESSION_END]` is encountered while currently in a session, the current session ends.
-3.  If `[SESSION_START]` is encountered while already in a session, the current session implicitly ends at the line *before* the new `[SESSION_START]`, and a new session begins with the current `[SESSION_START]` line.
-4.  If `[SESSION_END]` is encountered without an active preceding `[SESSION_START]`, it should be ignored.
-5.  Any active session that does not encounter a `[SESSION_END]` marker by the end of the log file is considered complete at the last log entry.
+Your program should process a stream of log entries (which are not necessarily sorted by timestamp, but will be processed effectively as if they were). For each log entry, you should update the user's activity history. If processing any log entry causes a user to meet the anomaly criteria, that user should be identified and added to a list of anomalous users.
 
-After identifying all such sessions, you must filter them. Only sessions that contain the given `search_keyword` anywhere within *any* of their log entries (case-insensitive) should be included in the final output. The output should preserve the original order of log entries within each session and the order of filtered sessions as they appear in the original logs.
+Once a user is identified as anomalous, they should not be reported again for subsequent anomalies.
+
+**Input:**
+- `logs`: A list of strings, where each string represents a log entry in the format "timestamp,user_id,event_type".
+  - `timestamp`: Integer, seconds since epoch.
+  - `user_id`: String.
+  - `event_type`: String.
+- `window_seconds`: Integer, the size of the time window in seconds.
+- `min_distinct_events`: Integer, the minimum number of distinct event types required to trigger an anomaly.
+
+**Output:**
+- A list of `user_id`s who have exhibited anomalous behavior, sorted alphabetically. Each user should appear only once in the output, even if they have multiple anomalous sequences.
  *
  * Examples:
- * [object Object],[object Object],[object Object]
+ * [object Object],[object Object]
  * 
  * Constraints:
- * The `logs` list will contain between 0 and 1000 strings.,Each log line string will have a length between 0 and 200 characters.,The `search_keyword` string will have a length between 0 and 50 characters.,Log lines can contain any printable ASCII characters.,The `[SESSION_START]` and `[SESSION_END]` markers are literal strings to be matched.,Keyword matching for filtering should be case-insensitive.
+ * 1 <= len(logs) <= 10^5,Each log entry is a string "timestamp,user_id,event_type".,timestamp: integer, 1 <= timestamp <= 10^9,user_id: string, alphanumeric, 1 <= len(user_id) <= 20,event_type: string, alphanumeric, 1 <= len(event_type) <= 30,1 <= window_seconds <= 10^9,1 <= min_distinct_events <= 100,The input `logs` list is not guaranteed to be sorted by timestamp. Your solution should correctly handle this (e.g., by sorting logs first, or by using appropriate data structures for each user).,Output `user_id`s should be sorted alphabetically and unique.
  *
  * Difficulty: Medium
  */
 
 // ── Stage 1 ──
-function extractSessions(logs: string[]): string[][] {
-    const SESS_START_MARKER = '[SESSION_START]';
-    const SESS_END_MARKER = '[SESSION_END]';
-
-    // Array to store all successfully extracted sessions.
-    // Each session is an array of log lines.
-    const sessions: string[][] = [];
-    // Temporary array to hold log lines for the session currently being built.
-    let currentSessionLines: string[] = [];
-    // Flag to indicate if we are currently inside an active session.
-    let sessionInProgress: boolean = false;
-
-    for (const line of logs) {
-        const hasStart = line.includes(SESS_START_MARKER);
-        const hasEnd = line.includes(SESS_END_MARKER);
-
-        if (hasStart) {
-            // Rule 3: If '[SESSION_START]' is encountered while already in a session,
-            // the current session implicitly ends at the line *before* this new start.
-            if (sessionInProgress) {
-                // Finalize and store the previously active session.
-                sessions.push(currentSessionLines);
-                // Clear for the new session that is about to begin.
-                currentSessionLines = [];
-            }
-            // Rule 1: A new session always begins with the current '[SESSION_START]' line.
-            sessionInProgress = true;
-            currentSessionLines.push(line);
-        } else if (hasEnd) {
-            // Rule 2: If '[SESSION_END]' is encountered while currently in a session,
-            // the current session ends.
-            if (sessionInProgress) {
-                currentSessionLines.push(line); // Include the end marker in the session.
-                sessions.push(currentSessionLines); // Finalize and store the session.
-                currentSessionLines = []; // Clear for the next potential session.
-                sessionInProgress = false; // Session is no longer active.
-            }
-            // Rule 4: If '[SESSION_END]' is encountered without an active preceding '[SESSION_START]',
-            // it should be ignored. This is implicitly handled by the 'else if' condition
-            // requiring 'sessionInProgress' to be true.
-        } else {
-            // No session markers found in this line.
-            if (sessionInProgress) {
-                // If currently in a session, add the line to the current session.
-                currentSessionLines.push(line);
-            }
-            // If not in a session, the line is outside any session and should be ignored (implicitly handled).
-        }
-    }
-
-    // Rule 5: Any active session that does not encounter a '[SESSION_END]' marker
-    // by the end of the log file is considered complete at the last log entry.
-    if (sessionInProgress) {
-        sessions.push(currentSessionLines);
-    }
-
-    return sessions;
+interface LogEntry {
+    timestamp: number;
+    userId: string;
+    eventType: string;
 }
 
-// ── Stage 2 ──
-function extractAndFilterLogSessions(logs: string[], search_keyword: string): string[][] {
-    // This array will store all sessions extracted from the logs before filtering.
-    const allExtractedSessions: string[][] = [];
-    // This array temporarily holds log entries for the session currently being processed.
-    let currentSession: string[] = [];
-    // A boolean flag to indicate if we are currently inside an active session.
-    let inSession: boolean = false;
+interface UserActivityState {
+    // Stores all relevant events for a user, sorted by timestamp.
+    // Since parsedLogs are sorted globally, adding to this array maintains per-user chronological order.
+    events: LogEntry[];
+    
+    // Index of the first event in 'events' that is potentially within the current active time window.
+    // This pointer allows efficient 'pruning' of old events without shifting array elements.
+    windowStartIndex: number;
+}
 
-    // Convert the search keyword to lower case once to perform case-insensitive matching efficiently.
-    const lowerCaseSearchKeyword = search_keyword.toLowerCase();
+function detectAnomaly(
+    logs: string[],
+    window_seconds: number,
+    min_distinct_events: number
+): string[] {
+    // 1. Parse and Sort Logs
+    // It is crucial to sort all log entries by timestamp first because the input 'logs' list is not guaranteed to be sorted.
+    // This ensures that when we process events for a user, we consider them in chronological order across all users,
+    // which is vital for correctly managing time windows.
+    const parsedLogs: LogEntry[] = logs.map(log => {
+        const parts = log.split(',');
+        return {
+            timestamp: parseInt(parts[0], 10), // Parse timestamp as an integer
+            userId: parts[1],
+            eventType: parts[2],
+        };
+    });
 
-    // Iterate through each log entry in the provided list.
-    for (const logEntry of logs) {
-        // Check if the current log entry contains the session start or end markers.
-        const isSessionStart = logEntry.includes('[SESSION_START]');
-        const isSessionEnd = logEntry.includes('[SESSION_END]');
+    // Sort all log entries by their timestamp in ascending order.
+    parsedLogs.sort((a, b) => a.timestamp - b.timestamp);
 
-        // Handle log entries containing '[SESSION_START]'.
-        if (isSessionStart) {
-            // Rule 3: If '[SESSION_START]' is encountered while already in a session,
-            // the current session implicitly ends at the line *before* this new start.
-            if (inSession) {
-                allExtractedSessions.push(currentSession); // Finalize and store the previous session.
-            }
-            // Rule 1: A new session begins with the current '[SESSION_START]' line.
-            currentSession = [logEntry]; // Initialize new session with this log entry.
-            inSession = true; // Mark that we are now in an active session.
-        } 
-        // Handle log entries containing '[SESSION_END]'.
-        else if (isSessionEnd) {
-            // Rule 2: If '[SESSION_END]' is encountered while currently in a session,
-            // the current session ends.
-            if (inSession) {
-                currentSession.push(logEntry); // Add the end marker to the session.
-                allExtractedSessions.push(currentSession); // Finalize and store the session.
-                inSession = false; // Mark that we are no longer in a session.
-                currentSession = []; // Clear current session data for the next potential session.
-            }
-            // Rule 4: If '[SESSION_END]' is encountered without an active preceding '[SESSION_START]',
-            // it should be ignored. This is handled implicitly because 'inSession' would be false.
-        } 
-        // Handle regular log entries (neither start nor end markers).
-        else {
-            // If currently in a session, add the log entry to the current session.
-            if (inSession) {
-                currentSession.push(logEntry);
-            }
-            // If not in a session, this log entry is ignored as it doesn't belong to any active session.
+    // userActivity: Map to store the activity history for each user.
+    // Key: user_id (string)
+    // Value: UserActivityState object containing their events and a pointer for window management.
+    const userActivity = new Map<string, UserActivityState>();
+
+    // anomalousUsers: Set to store user_ids that have been identified as anomalous.
+    // Using a Set automatically handles uniqueness and prevents re-reporting the same user.
+    const anomalousUsers = new Set<string>();
+
+    // 2. Process Sorted Logs
+    // Iterate through each log entry in chronological order.
+    for (const logEntry of parsedLogs) {
+        const { timestamp, userId, eventType } = logEntry;
+
+        // If this user has already been identified as anomalous, skip further processing for them
+        // as per the requirement: "Once a user is identified as anomalous, they should not be reported again."
+        if (anomalousUsers.has(userId)) {
+            continue;
+        }
+
+        // Get or initialize the activity state for the current user.
+        let userState = userActivity.get(userId);
+        if (!userState) {
+            // If the user is new, create a new state object for them.
+            userState = { events: [], windowStartIndex: 0 };
+            userActivity.set(userId, userState);
+        }
+
+        // Add the current log entry to the user's history.
+        // Since the overall `parsedLogs` are sorted, pushing to `userState.events` maintains its chronological order.
+        userState.events.push(logEntry);
+
+        // Determine the start time of the current time window.
+        // Any event with a timestamp strictly less than `windowStartTime` is outside this window.
+        const windowStartTime = timestamp - window_seconds;
+
+        // 3. Prune old events from the start of the window (conceptually)
+        // Advance `windowStartIndex` past any events that are now outside the `windowStartTime`.
+        // This effectively implements a sliding window. `windowStartIndex` only moves forward,
+        // making this an amortized O(1) operation over all events for a user.
+        while (
+            userState.windowStartIndex < userState.events.length &&
+            userState.events[userState.windowStartIndex].timestamp < windowStartTime
+        ) {
+            userState.windowStartIndex++;
+        }
+
+        // 4. Count distinct event types within the current window
+        // Initialize a Set to store distinct event types. Sets automatically handle uniqueness.
+        const distinctEventTypes = new Set<string>();
+        
+        // Iterate through events for the user, starting from `windowStartIndex` (the first event in the window).
+        // and add their event types to the `distinctEventTypes` Set.
+        for (let i = userState.windowStartIndex; i < userState.events.length; i++) {
+            distinctEventTypes.add(userState.events[i].eventType);
+        }
+
+        // 5. Check for anomaly criteria
+        // If the number of distinct event types in the current window meets or exceeds `min_distinct_events`,
+        // then the user is considered anomalous.
+        if (distinctEventTypes.size >= min_distinct_events) {
+            anomalousUsers.add(userId);
         }
     }
 
-    // Rule 5: Any active session that does not encounter a '[SESSION_END]' marker
-    // by the end of the log file is considered complete at the last log entry.
-    // Ensure currentSession has content before pushing to avoid empty arrays in case of edge scenarios
-    // where a session was implicitly closed by a new start or already ended normally.
-    if (inSession && currentSession.length > 0) {
-        allExtractedSessions.push(currentSession);
-    }
+    // 6. Prepare final output
+    // Convert the Set of anomalous user IDs to an array and sort it alphabetically
+    // as required by the problem description.
+    const result = Array.from(anomalousUsers).sort((a, b) => a.localeCompare(b));
 
-    // Filter the extracted sessions based on the provided 'search_keyword'.
-    const filteredSessions: string[][] = [];
-    // If the search keyword is empty, any log entry (and thus any session) is considered to contain it.
-    // In this case, all extracted sessions should be returned directly.
-    if (lowerCaseSearchKeyword.length === 0) {
-        return allExtractedSessions;
-    }
-
-    // Iterate through all extracted sessions to apply the keyword filter.
-    for (const session of allExtractedSessions) {
-        let hasKeyword = false;
-        // Check each log line within the session for the keyword.
-        for (const logLine of session) {
-            // Perform case-insensitive search.
-            if (logLine.toLowerCase().includes(lowerCaseSearchKeyword)) {
-                hasKeyword = true; // Keyword found in this session.
-                break; // No need to check further lines in this session.
-            }
-        }
-        // If the keyword was found in any log entry of the session, add the session to the result.
-        if (hasKeyword) {
-            filteredSessions.push(session);
-        }
-    }
-
-    return filteredSessions;
+    return result;
 }
