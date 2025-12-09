@@ -82,3 +82,91 @@ function extractSessions(logs: string[]): string[][] {
 
     return sessions;
 }
+
+// ── Stage 2 ──
+function extractAndFilterLogSessions(logs: string[], search_keyword: string): string[][] {
+    // This array will store all sessions extracted from the logs before filtering.
+    const allExtractedSessions: string[][] = [];
+    // This array temporarily holds log entries for the session currently being processed.
+    let currentSession: string[] = [];
+    // A boolean flag to indicate if we are currently inside an active session.
+    let inSession: boolean = false;
+
+    // Convert the search keyword to lower case once to perform case-insensitive matching efficiently.
+    const lowerCaseSearchKeyword = search_keyword.toLowerCase();
+
+    // Iterate through each log entry in the provided list.
+    for (const logEntry of logs) {
+        // Check if the current log entry contains the session start or end markers.
+        const isSessionStart = logEntry.includes('[SESSION_START]');
+        const isSessionEnd = logEntry.includes('[SESSION_END]');
+
+        // Handle log entries containing '[SESSION_START]'.
+        if (isSessionStart) {
+            // Rule 3: If '[SESSION_START]' is encountered while already in a session,
+            // the current session implicitly ends at the line *before* this new start.
+            if (inSession) {
+                allExtractedSessions.push(currentSession); // Finalize and store the previous session.
+            }
+            // Rule 1: A new session begins with the current '[SESSION_START]' line.
+            currentSession = [logEntry]; // Initialize new session with this log entry.
+            inSession = true; // Mark that we are now in an active session.
+        } 
+        // Handle log entries containing '[SESSION_END]'.
+        else if (isSessionEnd) {
+            // Rule 2: If '[SESSION_END]' is encountered while currently in a session,
+            // the current session ends.
+            if (inSession) {
+                currentSession.push(logEntry); // Add the end marker to the session.
+                allExtractedSessions.push(currentSession); // Finalize and store the session.
+                inSession = false; // Mark that we are no longer in a session.
+                currentSession = []; // Clear current session data for the next potential session.
+            }
+            // Rule 4: If '[SESSION_END]' is encountered without an active preceding '[SESSION_START]',
+            // it should be ignored. This is handled implicitly because 'inSession' would be false.
+        } 
+        // Handle regular log entries (neither start nor end markers).
+        else {
+            // If currently in a session, add the log entry to the current session.
+            if (inSession) {
+                currentSession.push(logEntry);
+            }
+            // If not in a session, this log entry is ignored as it doesn't belong to any active session.
+        }
+    }
+
+    // Rule 5: Any active session that does not encounter a '[SESSION_END]' marker
+    // by the end of the log file is considered complete at the last log entry.
+    // Ensure currentSession has content before pushing to avoid empty arrays in case of edge scenarios
+    // where a session was implicitly closed by a new start or already ended normally.
+    if (inSession && currentSession.length > 0) {
+        allExtractedSessions.push(currentSession);
+    }
+
+    // Filter the extracted sessions based on the provided 'search_keyword'.
+    const filteredSessions: string[][] = [];
+    // If the search keyword is empty, any log entry (and thus any session) is considered to contain it.
+    // In this case, all extracted sessions should be returned directly.
+    if (lowerCaseSearchKeyword.length === 0) {
+        return allExtractedSessions;
+    }
+
+    // Iterate through all extracted sessions to apply the keyword filter.
+    for (const session of allExtractedSessions) {
+        let hasKeyword = false;
+        // Check each log line within the session for the keyword.
+        for (const logLine of session) {
+            // Perform case-insensitive search.
+            if (logLine.toLowerCase().includes(lowerCaseSearchKeyword)) {
+                hasKeyword = true; // Keyword found in this session.
+                break; // No need to check further lines in this session.
+            }
+        }
+        // If the keyword was found in any log entry of the session, add the session to the result.
+        if (hasKeyword) {
+            filteredSessions.push(session);
+        }
+    }
+
+    return filteredSessions;
+}
